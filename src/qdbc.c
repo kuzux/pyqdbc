@@ -1,4 +1,5 @@
 #include <Python.h>
+#include <datetime.h>
 
 #define KXVER 3
 #include <k.h>
@@ -15,9 +16,20 @@
   int fcntl (intptr_t fd, int cmd, ...) { return 1; }
 #endif
 
+#define TIMESTAMP_OFFSET 946677600
+#define DATETIME_OFFSET 
 static PyObject* QdbcError;
 
 PyObject* get_atom(K k) {
+    long micros, secs;
+    double us;
+
+    int years;
+    int months;
+    int days;
+
+    PyObject* tmp;
+
     switch(k->t) {
         case -1: return PyBool_FromLong(k->g);                      /* bool  */
         case -4: return PyInt_FromLong(k->g);                       /* byte  */ 
@@ -30,16 +42,28 @@ PyObject* get_atom(K k) {
         case -11: return PyString_FromString(k->s);                 /* symbol */
         case -12: 
             /* timestamp */
-            break;
+            micros = (k->j%1000000000)/1000;
+            secs = (k->j/1000000000);
+            us = (micros/1000000.0);
+
+            tmp = PyFloat_FromDouble(TIMESTAMP_OFFSET+secs+us);
+            tmp = Py_BuildValue("(o)", tmp);
+            return PyDateTime_FromTimestamp(tmp);
         case -13:
             /* month */
-            break;
+            months = 1 + (k->i)%12;
+            years = 2000 + (k->i)/12;
+            return PyDateTime_FromDateAndTime(years, months, 1, 0, 0, 0, 0);
         case -14:
             /* date */
-            break;
+            days = 1 + (k->i)%30;
+            months = 1 + ((k->i)/30)%12;
+            years = 2000 + ((k->i)/30*12);
+
+            return PyDateTime_FromDateAndTime(years, months, days, 0, 0, 0, 0);
         case -15:
             /* datetime */
-            break;
+            return PyFloat_FromDouble(k->f);
         case -16:
             /* timespan */
             break;

@@ -52,6 +52,8 @@ PyObject* get_atom(K k) {
 
     PyObject* tmp;
 
+    printf("Object type %d\n", k->t);
+
     switch(k->t) {
         case -1: return PyBool_FromLong(k->g);                      /* bool  */
         case -4: return PyInt_FromLong(k->g);                       /* byte  */ 
@@ -75,12 +77,16 @@ PyObject* get_atom(K k) {
             /* month */
             months = 1 + (k->i)%12;
             years = 2000 + (k->i)/12;
+
             return PyDateTime_FromDateAndTime(years, months, 1, 0, 0, 0, 0);
         case -14:
             /* date */
             days = 1 + (k->i)%30;
             months = 1 + ((k->i)/30)%12;
-            years = 2000 + ((k->i)/30*12);
+            years = ((k->i)/30*12);
+
+            printf("raw: %d\n", k->i);
+            printf("%d %d %d\n", years, months, days);
 
             return PyDateTime_FromDateAndTime(years, months, days, 0, 0, 0, 0);
         case -15:
@@ -175,6 +181,8 @@ PyMODINIT_FUNC initqdbc(void) {
     QdbcError = PyErr_NewException("qdbc.error", NULL, NULL);
     Py_INCREF(QdbcError);
     PyModule_AddObject(m, "error", QdbcError);
+
+    PyDateTime_IMPORT;
 }
 
 int main(int argc, char** argv) {

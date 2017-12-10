@@ -26,8 +26,13 @@ class QConnection(object):
     def __init__(self, host="localhost", port=20001):
         self.host = host
         self.port = port
+
+    def ping(self):
+        return qdbc.ping(host, port)
+    
     def query(self, query):
-        qdbc.query(self.host, self.port, query)
+        return qdbc.query(self.host, self.port, query)
+    
     def get_table(self, query, conds={}, cols=[]):
         # selecting from a table using a few equals statements is super
         # common in partitioned table

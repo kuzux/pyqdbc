@@ -53,7 +53,7 @@
 #ifdef _WIN32 /* Windows-related shit, basically */
   #define F_GETFL 3
   void __security_check_cookie(int i) {};
-  int fcntl (intptr_t fd, int cmd, ...) { return 1; }
+  int fcntl (intptr_t fd, int cmd, ...) { return (fd>=0)?1:-1; }
 #endif
 
 #define DATE_OFFSET 10957
@@ -223,12 +223,40 @@ static PyObject* qdbc_testnumpy(PyObject* self, PyObject* args) {
     return res;
 }
 
+static PyObject* qdbc_ping(PyObject* self, PyObject* args) {
+    char* host;
+    int port;
+    if(!PyArg_ParseTuple(args, "si", &host, &port)) {
+        return NULL;
+    }
+
+    int conn = khp(host, port);
+
+    if(fcntl(conn, F_GETFL) < 0 || errno == EBADF) {
+        Py_INCREF(Py_False);
+        return Py_False;
+    }
+
+    K reply = k(conn, "::");
+    
+    kclose(conn);
+    if(reply->t == 101) {
+        Py_INCREF(Py_True);
+        return Py_True;
+    } else {
+        Py_INCREF(Py_False);
+        return Py_False;
+    }
+}
+
 /* TODO: Write a check_connection helper */
 /* TODO: Write qopen/qclose type functions to keep a single session open */
 
 static PyMethodDef QdbcMethods[] = {
     {"query", qdbc_query, METH_VARARGS,
         "Run a KDB query"},
+    {"ping", qdbc_ping, METH_VARARGS,
+        "Checks if a Q instance is healthy"},
     {"testnumpy", qdbc_testnumpy, METH_VARARGS,
         "Try returning a numpy array from C"},
     {NULL, NULL, 0, NULL}

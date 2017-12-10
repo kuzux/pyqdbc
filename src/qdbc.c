@@ -24,11 +24,16 @@
 /* Apparently datetimes in python need to be imported and initialized separately */
 #include <datetime.h>
 
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#define PY_ARRAY_UNIQUE_SYMBOL qdbc
+#include <numpy/arrayobject.h>
+
 #define KXVER 3
 #include <k.h>
 
 /* we still need this outside debug mode because we need to use snprintf */
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 /* Can we definitely work on windows? 
  * TODO: fix the build script on windows
@@ -204,12 +209,28 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
     return retVal;
 }
 
+static PyObject* qdbc_testnumpy(PyObject* self, PyObject* args) {
+    double* vals = (double*)malloc(2*sizeof(double));
+    vals[0] = 3.5;
+    vals[1] = 7.8;
+
+    long dims[1];
+    dims[0] = 2;
+    int numDims = 1;
+
+    PyObject* res = PyArray_SimpleNewFromData(numDims, dims, NPY_DOUBLE, vals);
+    PyArray_ENABLEFLAGS((PyArrayObject*)res, NPY_ARRAY_OWNDATA);
+    return res;
+}
+
 /* TODO: Write a check_connection helper */
 /* TODO: Write qopen/qclose type functions to keep a single session open */
 
 static PyMethodDef QdbcMethods[] = {
     {"query", qdbc_query, METH_VARARGS,
         "Run a KDB query"},
+    {"testnumpy", qdbc_testnumpy, METH_VARARGS,
+        "Try returning a numpy array from C"},
     {NULL, NULL, 0, NULL}
 };
 
@@ -226,6 +247,7 @@ PyMODINIT_FUNC initqdbc(void) {
     PyModule_AddObject(m, "error", QdbcError);
 
     PyDateTime_IMPORT;
+    import_array();
 }
 
 int main(int argc, char** argv) {

@@ -23,7 +23,7 @@ import qdbc
 # TODO: write some code to package the whole thing
 
 class QConnection(object):
-    def __init__(self, host="localhost", port=20001):
+    def __init__(self, host="localhost", port=5042):
         self.host = host
         self.port = port
 

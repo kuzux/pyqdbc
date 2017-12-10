@@ -24,6 +24,13 @@
 /* Apparently datetimes in python need to be imported and initialized separately */
 #include <datetime.h>
 
+/* TODO: Should we make the numpy dependency optional and fall back to classic
+ * python lists? Or we can provide a pure-python implementation that uses Q's
+ * HTTP support but is limited to 2000 rows.
+ *
+ * Kind of like this gist: 
+ * https://gist.github.com/kuzux/e857e9633d780a14c836a7cdbcea9cef 
+ * but with HTTP requests instead of spawning a Q process */
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL qdbc
 #include <numpy/arrayobject.h>
@@ -110,6 +117,13 @@ PyObject* get_atom(K k) {
              * between the Q epoch and the unix epoch. This was probably done 
              * in Q as timestamp objs have ns precision and a lot of the modern
              * times would overflow, even on int64 if unix epoch was used */
+            /* Update: If we count the nanoseconds from unix epoch, signed 64
+             * bit integers overflow in the year 2400 something. Let's hope that
+             * Q's choice of Epoch was because Arthur Whitney imaginedthe  30 years 
+             * after the date I've roughly calculated was more important than 
+             * compatibility with practically every other system in the world
+             * and not simply because of wanting to be 'different'.
+             * -- t3h PeNgU1N oF d00m */
             {
                 long micros = (k->j%1000000000)/1000;
                 long secs = (k->j/1000000000);
@@ -158,24 +172,23 @@ PyObject* get_atom(K k) {
     return NULL;
 }
 
-static PyObject* get_mixed_list(K k) {
-    TRACE("getting mixed list");
-    /* We need to convert this type of heterogeneus list 
-     * to a classic python list, not a numpy array */
-    return NULL;
-}
-
 static PyObject* get_list(K k) {
     /* function stub */
     TRACE("getting list");
 
     /* list of length n = dimensions are (n,) */
-    size_t len = k->n;
+    /* we're using a long instead of size_t here, as GCC complains when we use an
+     * unsigned integer instead of a signed one. I have no idea why numpy requires
+     * a signed integer for a length. */
+    long len = k->n;
     long num_dims = 1;
 
     int numpy_arr_type = 0;
 
     switch(k->t) {
+        /* numpy can handle arrays of arbitrary python objects. There's no 
+         * guarantee that it's going to be fast, though :) */
+        case 0: numpy_arr_type = NPY_OBJECT; break;    /* mixed list */
         case 1: numpy_arr_type = NPY_BOOL; break;      /* bool */
         case 4: numpy_arr_type = NPY_BYTE; break;      /* byte */
         case 5: numpy_arr_type = NPY_SHORT; break;     /* short */
@@ -213,8 +226,52 @@ static PyObject* get_list(K k) {
             PyErr_SetString(QdbcError, "Unsupported array type");
             return NULL;
     }
+    
+    /* I think I've written k->t too many times and now this song is playing
+     * in my head: https://youtu.be/FGT0A2Hz-uk */
+    /* Plus; why does my code read like a piece of stream-of-consciousness
+     * writing? */
+    
+    /* PyObject and PyArrayObject's representations are compatible with each
+     * other, so we can safely cast between those two types */
+    /* Also; the pointer for the argument of this function is only needed to
+     * be able to get an array, the value is copied within the function,
+     * and I'm too lazy to initialize a new array of length one, so I am
+     * sending in a pointer to a stack value here. Think of it as a stack
+     * allocated array of length 1 */
+    PyArrayObject* array = (PyArrayObject*)PyArray_SimpleNew(num_dims, &len, numpy_arr_type);
+    PyObject* ret_val = NULL;
 
-    return NULL;
+    switch(k->t) {
+        case 0:
+            {
+                for(size_t i=0;i<len;i++) {
+                    K elem = kK(k)[i];
+                    if(elem->t<0) {
+                        /* This doesn't work without that temp variable as that expression is
+                         * not an lvalue */
+                        PyObject** addr = PyArray_GETPTR1(array,i);
+                        *addr = get_atom(elem);
+                    } else {
+                        /* TODO: Implement this */
+                        PyErr_SetString(QdbcError, "Getting nested lists not yet implemented");
+                        return NULL;
+                    }
+                }
+            }
+            ret_val = (PyObject*)array;
+            break;
+        default:
+            TRACE("list parsing not yet implemented for %d", k->t);
+            break;
+    }
+
+    if(ret_val == NULL) {
+        PyErr_SetString(QdbcError, "Couldn't parse list");
+        return NULL;
+    }
+
+    return ret_val;
 }
 
 static PyObject* get_dict(K k) {
@@ -286,13 +343,12 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
 
     if(res->t < 0) {
         retVal = get_atom(res);
-    } else if(res->t==0) {
-        retVal = get_mixed_list(res);
     } else if(res->t == 98) {
         retVal = get_table(res);
     } else if(res->t == 99) {
         retVal = get_dict(res);
     } else {
+        /* This handles mixed lists as well */
         retVal = get_list(res);
     }
 

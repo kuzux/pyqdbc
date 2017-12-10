@@ -92,6 +92,7 @@ PyObject* get_atom(K k) {
 
     PyObject* tmp;
 
+    /* TODO: maybe we should add an example for each of Q's atom types? */
     switch(k->t) {
         case -1: return PyBool_FromLong(k->g);                      /* bool  */
         case -4: return PyInt_FromLong(k->g);                       /* byte  */ 
@@ -104,6 +105,11 @@ PyObject* get_atom(K k) {
         case -11: return PyString_FromString(k->s);                 /* symbol */
         case -12: 
             /* timestamp */
+            /* The quirk of those objects is that the epoch is the millenium.
+             * Jan 01, 2000. That's why we need all those offsets. To convert 
+             * between the Q epoch and the unix epoch. This was probably done 
+             * in Q as timestamp objs have ns precision and a lot of the modern
+             * times would overflow, even on int64 if unix epoch was used */
             {
                 long micros = (k->j%1000000000)/1000;
                 long secs = (k->j/1000000000);
@@ -170,18 +176,42 @@ static PyObject* get_list(K k) {
     int numpy_arr_type = 0;
 
     switch(k->t) {
-        case 1: return PyBool_FromLong(k->g);                      /* bool  */
-        case 4: return PyInt_FromLong(k->g);                       /* byte  */ 
-        case 5: return PyInt_FromLong(k->h);                       /* short */
-        case 6: return PyLong_FromLong(k->i);                      /* int   */
-        case 7: return PyLong_FromLong(k->j);                      /* long  */
-        case 8: return PyFloat_FromDouble(k->e);                   /* real  */
-        case 9: return PyFloat_FromDouble(k->f);                   /* float */
-        case 10: return PyString_FromStringAndSize((char*)&k->i, 1); /* char */
-        case 11: return PyString_FromString(k->s);                 /* symbol */
-        case 12: 
-            /* timestamp */
+        case 1: numpy_arr_type = NPY_BOOL; break;      /* bool */
+        case 4: numpy_arr_type = NPY_BYTE; break;      /* byte */
+        case 5: numpy_arr_type = NPY_SHORT; break;     /* short */
+        case 6: numpy_arr_type = NPY_INT; break;       /* int */
+        case 7: numpy_arr_type = NPY_LONG; break;      /* long */
+        case 8: numpy_arr_type = NPY_FLOAT; break;     /* real */
+        case 9: numpy_arr_type = NPY_DOUBLE; break;    /* float */
+        case 10: numpy_arr_type = NPY_UNICODE; break;  /* char */
+        case 11:                                       /* symbol */
+            /* Neither python nor numpy has a concept of symbols, with
+             * the lookup table and all. That would be a significant advantage.
+             * Ruby is definitely better in this regard. Maybe we should return
+             * a lookup table and an array of integers in this case? (For
+             * performance reasons, I guess). For the case of returning a
+             * single symbol, converting it to a string is fine, though */
+            numpy_arr_type = NPY_STRING; 
             break;
+        /* all the temporal types */
+        case 12:                                       /* timestamp */
+        case 13:                                       /* month */
+        case 14:                                       /* date */
+        case 15:                                       /* datetime */
+            numpy_arr_type = NPY_DATETIME;
+            break;
+        case 16:                                       /* timespan */
+        case 17:                                       /* minute */
+        case 18:                                       /* second */
+        case 19:                                       /* time */
+            numpy_arr_type = NPY_TIMEDELTA;
+            break;
+            /* Yup, there's no hour type. I can see how it is not needed,
+             * but given that we have that many datetime types, including 
+             * an hour type for orthogonality's sake wouldn't be too weird. */
+        default:
+            PyErr_SetString(QdbcError, "Unsupported array type");
+            return NULL;
     }
 
     return NULL;

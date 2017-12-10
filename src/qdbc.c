@@ -204,6 +204,9 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
     return retVal;
 }
 
+/* TODO: Write a check_connection helper */
+/* TODO: Write qopen/qclose type functions to keep a single session open */
+
 static PyMethodDef QdbcMethods[] = {
     {"query", qdbc_query, METH_VARARGS,
         "Run a KDB query"},

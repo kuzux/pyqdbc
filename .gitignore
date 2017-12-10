@@ -2,4 +2,8 @@ build/
 lib/c.o
 lib/*.so
 qdbc.so
+*.pyc
+src/*.pyc
+*~
+*/*~
 

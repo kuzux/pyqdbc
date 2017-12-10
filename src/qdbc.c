@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
+#include <math.h>
 
 #define BUFSIZE 255
 
@@ -38,8 +39,10 @@
   int fcntl (intptr_t fd, int cmd, ...) { return 1; }
 #endif
 
-#define TIMESTAMP_OFFSET 946677600
-#define DATETIME_OFFSET 
+#define DATE_OFFSET 10957
+#define DAYS_TO_SECS 86400
+#define EPOCH_OFFSET_SECS 946677600
+
 static PyObject* QdbcError;
 
 PyObject* get_atom(K k) {
@@ -51,8 +54,6 @@ PyObject* get_atom(K k) {
     int days;
 
     PyObject* tmp;
-
-    printf("Object type %d\n", k->t);
 
     switch(k->t) {
         case -1: return PyBool_FromLong(k->g);                      /* bool  */
@@ -70,7 +71,7 @@ PyObject* get_atom(K k) {
             secs = (k->j/1000000000);
             us = (micros/1000000.0);
 
-            tmp = PyFloat_FromDouble(TIMESTAMP_OFFSET+secs+us);
+            tmp = PyFloat_FromDouble(EPOCH_OFFSET_SECS+secs+us);
             tmp = Py_BuildValue("(o)", tmp);
             return PyDateTime_FromTimestamp(tmp);
         case -13:
@@ -81,17 +82,18 @@ PyObject* get_atom(K k) {
             return PyDateTime_FromDateAndTime(years, months, 1, 0, 0, 0, 0);
         case -14:
             /* date */
-            days = 1 + (k->i)%30;
-            months = 1 + ((k->i)/30)%12;
-            years = ((k->i)/30*12);
 
-            printf("raw: %d\n", k->i);
-            printf("%d %d %d\n", years, months, days);
-
-            return PyDateTime_FromDateAndTime(years, months, days, 0, 0, 0, 0);
+            tmp = Py_BuildValue("(i)", EPOCH_OFFSET_SECS+DAYS_TO_SECS*k->i);
+            return PyDateTime_FromTimestamp(tmp);
         case -15:
             /* datetime */
-            return PyFloat_FromDouble(k->f);
+            /* Q datetime objs are weird, in that they are floating point numbers
+             * where the part after point shows the time.
+             * It's advised to not use them in Q, and I'm not bothering
+             * to do the conversion yet 
+             */
+            printf("%f", k->f);
+            return NULL; 
         case -16:
             /* timespan */
             break;
@@ -107,6 +109,21 @@ PyObject* get_atom(K k) {
     }
 
     PyErr_SetString(QdbcError, "Atom type unknown");
+    return NULL;
+}
+
+static PyObject* get_list(K k) {
+    /* function stub */
+    return NULL;
+}
+
+static PyObject* get_dict(K k) {
+    /* function stub */
+    return NULL;
+}
+
+static PyObject* get_table(K k) {
+    /* function stub */
     return NULL;
 }
 
@@ -148,10 +165,24 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
         return NULL;
     }
 
+    if (res->t == 101) {
+        /* we have a void object */
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
+
     PyObject* retVal = NULL;
+
+    printf("Object type %d\n", res->t);
 
     if(res->t < 0) {
        retVal = get_atom(res);
+    } else if(res->t == 98) {
+        retVal = get_table(res);
+    } else if(res->t == 99) {
+        retVal = get_dict(res);
+    } else {
+        retVal = get_list(res);
     }
 
     if(!retVal) {

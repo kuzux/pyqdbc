@@ -62,6 +62,31 @@
 
 static PyObject* QdbcError;
 
+/* TODO how to handle infinite or null values? */
+
+/* 
+ * J/K family of languages are known for their particular style of naming variables
+ * and this style extends to their C sources as well (At least it does in J's case,
+ * we can see its source. For K, it definitely applies to its C bindings, where most
+ * types and functions' names are only a few characters long, and it's not obvious
+ * from the name (at least not to me) what do they do.
+ *
+ * Little explanation of stuff we use:
+ * the type K is a typedef to a pointer to a struct (that's why all those functions simply
+ * take a K value, not a pointer to it), which is more-or-less a tagged union. One of the 
+ * members, t, is the type of the value and it is the 'tag' in this 'tagged union'. We 
+ * obviously math on its value
+ * the function khp(char*, int) -> int is the function establishing connection to a running
+ * KDB/Q instance. It needs to have its port set, either by \p command or by a command line
+ * argument. The function returns us a raw file descriptor. On connection failure, it returns 
+ * a negative number
+ * the function k(int, char*) -> K is our main query function, it takes a file descriptor 
+ * returned by khp and a query; and runs that query in the remote Q instance. It returns
+ * NULL on connection failure and on compiler error; returns a valid K object whose type 
+ * is -255. (The error message is contained in a member variable
+ * kclose(int) -> void: the only function in use with a self-explanatory name 
+ */
+
 PyObject* get_atom(K k) {
     TRACE("reading atom");
 
@@ -98,7 +123,6 @@ PyObject* get_atom(K k) {
             }
         case -14:
             /* date */
-
             tmp = Py_BuildValue("(i)", EPOCH_OFFSET_SECS+DAYS_TO_SECS*k->i);
             return PyDateTime_FromTimestamp(tmp);
         case -15:
@@ -109,7 +133,7 @@ PyObject* get_atom(K k) {
              * to do the conversion yet 
              */
             TRACE("%f", k->f);
-            return NULL; 
+            break;
         case -16:
             /* timespan */
             break;
@@ -128,9 +152,38 @@ PyObject* get_atom(K k) {
     return NULL;
 }
 
+static PyObject* get_mixed_list(K k) {
+    TRACE("getting mixed list");
+    /* We need to convert this type of heterogeneus list 
+     * to a classic python list, not a numpy array */
+    return NULL;
+}
+
 static PyObject* get_list(K k) {
     /* function stub */
     TRACE("getting list");
+
+    /* list of length n = dimensions are (n,) */
+    size_t len = k->n;
+    long num_dims = 1;
+
+    int numpy_arr_type = 0;
+
+    switch(k->t) {
+        case 1: return PyBool_FromLong(k->g);                      /* bool  */
+        case 4: return PyInt_FromLong(k->g);                       /* byte  */ 
+        case 5: return PyInt_FromLong(k->h);                       /* short */
+        case 6: return PyLong_FromLong(k->i);                      /* int   */
+        case 7: return PyLong_FromLong(k->j);                      /* long  */
+        case 8: return PyFloat_FromDouble(k->e);                   /* real  */
+        case 9: return PyFloat_FromDouble(k->f);                   /* float */
+        case 10: return PyString_FromStringAndSize((char*)&k->i, 1); /* char */
+        case 11: return PyString_FromString(k->s);                 /* symbol */
+        case 12: 
+            /* timestamp */
+            break;
+    }
+
     return NULL;
 }
 
@@ -202,7 +255,9 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
     TRACE("Object type %d\n", res->t);
 
     if(res->t < 0) {
-       retVal = get_atom(res);
+        retVal = get_atom(res);
+    } else if(res->t==0) {
+        retVal = get_mixed_list(res);
     } else if(res->t == 98) {
         retVal = get_table(res);
     } else if(res->t == 99) {

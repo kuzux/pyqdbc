@@ -77,6 +77,8 @@
 #define DAYS_TO_SECS 86400
 #define EPOCH_OFFSET_SECS 946677600
 
+#define SYMBOL_MAXLEN 80
+
 static PyObject* QdbcError;
 
 /* TODO how to handle infinite or null values? */
@@ -184,7 +186,6 @@ PyObject* get_atom(K k) {
 }
 
 static PyObject* get_list(K k) {
-    /* function stub */
     TRACE("getting list");
 
     /* list of length n = dimensions are (n,) */
@@ -341,6 +342,33 @@ static PyObject* get_list(K k) {
         case 10: /* char */
             /* TODO: How do we implement that? Char arrays are strings in Q as well */
             break;
+        case 11: /* symbol */
+            TRACE("Getting a list of symbols");
+            /* Creaing a list of strings fails, so we need to create it with a
+             * longer method here */
+            if(array != NULL) {
+                TRACE("wtf how did this get created");
+            }
+
+            {
+                PyArray_Descr* dtype = PyArray_DescrNewFromType(NPY_STRING);
+
+                TRACE("%d", dtype->type_num);
+                if(dtype->subarray != NULL) TRACE("subarray");
+                if(dtype->fields != NULL) TRACE("fields");
+
+            }
+
+            {
+                for(long i=0; i<len; i++) {
+                    char** dest = PyArray_GETPTR1(array, 0);
+                    char* src = kS(k)[i];
+                    TRACE("%s", src);
+                    strncpy(*dest, src, SYMBOL_MAXLEN);
+                }
+            }
+            ret_val = (PyObject*)array;
+            break;
         default:
             TRACE("list parsing not yet implemented for %d", k->t);
             break;
@@ -357,7 +385,29 @@ static PyObject* get_list(K k) {
 static PyObject* get_dict(K k) {
     /* function stub */
     TRACE("getting dictionary");
-    return NULL;
+
+    K keys = kK(k)[0]; /* OK, how racist are we? */
+    K data = kK(k)[1]; /* It's not getting any better */
+
+    char** key_names = kS(keys);
+
+    int num_keys = keys->n;
+    TRACE("num_keys %d", num_keys);
+
+    PyObject* ret_val = PyDict_New();
+
+    for(int i=0;i<num_keys;i++) {
+        TRACE("%s", key_names[i]);
+        K item = kK(data)[i];
+        TRACE("got item");
+        if(item->t < 0) {
+            PyDict_SetItemString(ret_val, key_names[i], get_atom(item));
+        } else {
+            PyDict_SetItemString(ret_val, key_names[i], get_list(item));
+        }
+    }
+
+    return ret_val;
 }
 
 static PyObject* get_table(K k) {

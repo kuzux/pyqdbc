@@ -45,9 +45,9 @@
 
 #define DEBUG
 #ifdef DEBUG
-    #define TRACE printf
+#define TRACE(fmt, ...) do{ fprintf(stderr, #fmt "\n", ## __VA_ARGS__); } while(0);
 #else
-    #define printf
+#define TRACE
 #endif
 
 #ifdef _WIN32 /* Windows-related shit, basically */
@@ -63,6 +63,8 @@
 static PyObject* QdbcError;
 
 PyObject* get_atom(K k) {
+    TRACE("reading atom");
+
     PyObject* tmp;
 
     switch(k->t) {
@@ -128,16 +130,19 @@ PyObject* get_atom(K k) {
 
 static PyObject* get_list(K k) {
     /* function stub */
+    TRACE("getting list");
     return NULL;
 }
 
 static PyObject* get_dict(K k) {
     /* function stub */
+    TRACE("getting dictionary");
     return NULL;
 }
 
 static PyObject* get_table(K k) {
     /* function stub */
+    TRACE("getting table");
     return NULL;
 }
 
@@ -145,19 +150,19 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
     char* host;
     int port;
     char* query;
-    int query_len;
 
-    if(!PyArg_ParseTuple(args, "sis#"/* atma oc */, &host, &port, &query, &query_len)) {
+    if(!PyArg_ParseTuple(args, "sis"/* atma oc */, &host, &port, &query)) {
         return NULL;
     }
 
-    if(query_len == 0) {
-        /* return an empty object if the query is simply empty */
-        return Py_BuildValue("");
-    }
+    /* There used to be an empty check for the query, but apparently
+     * Q just returns void on empty query and doesn't complain
+     * so the check was kind of superfluous */
 
     int conn;
     conn = khp(host, port);
+    TRACE("connection fd %d", conn);
+
     /* Check the connection */
     if(fcntl(conn, F_GETFL) < 0 || errno == EBADF) {
         PyErr_SetString(QdbcError, "Couldn't connect");
@@ -176,12 +181,19 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
         char buf[BUFSIZE];
         snprintf(buf, BUFSIZE, "Q error: %s", res->s);
         PyErr_SetString(QdbcError, buf);
+
+        TRACE("closing connection");
+        kclose(conn);
+        
         return NULL;
     }
 
     if (res->t == 101) {
+        TRACE("getting void");
         /* we have a void object */
         Py_INCREF(Py_None);
+        TRACE("closing connection");
+        kclose(conn);
         return Py_None;
     }
 
@@ -203,7 +215,8 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
         PyErr_SetString(QdbcError, "Deserializing this type is not yet implemented");
         return NULL;
     }
-    
+
+    TRACE("closing connection");
     kclose(conn);
 
     return retVal;
@@ -231,6 +244,7 @@ static PyObject* qdbc_ping(PyObject* self, PyObject* args) {
     }
 
     int conn = khp(host, port);
+    TRACE("conn fd %d", conn);
 
     if(fcntl(conn, F_GETFL) < 0 || errno == EBADF) {
         Py_INCREF(Py_False);
@@ -238,8 +252,11 @@ static PyObject* qdbc_ping(PyObject* self, PyObject* args) {
     }
 
     K reply = k(conn, "::");
-    
+    TRACE("ping reply type %d", reply->t);
+
+    TRACE("closing connection");
     kclose(conn);
+
     if(reply->t == 101) {
         Py_INCREF(Py_True);
         return Py_True;
@@ -249,7 +266,6 @@ static PyObject* qdbc_ping(PyObject* self, PyObject* args) {
     }
 }
 
-/* TODO: Write a check_connection helper */
 /* TODO: Write qopen/qclose type functions to keep a single session open */
 
 static PyMethodDef QdbcMethods[] = {
@@ -263,6 +279,7 @@ static PyMethodDef QdbcMethods[] = {
 };
 
 PyMODINIT_FUNC initqdbc(void) {
+    TRACE("Initializing module");
     PyObject* m;
     m = Py_InitModule("qdbc", QdbcMethods);
     

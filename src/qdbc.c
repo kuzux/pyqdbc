@@ -20,6 +20,12 @@
  * SOFTWARE.
 **/
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+/* Python.h _might_ affect the behavior of other includes (not sure how) so it
+ * needs to be included at the top of the file */
 #include <Python.h>
 /* Apparently datetimes in python need to be imported and initialized separately */
 #include <datetime.h>
@@ -31,6 +37,7 @@
  * Kind of like this gist: 
  * https://gist.github.com/kuzux/e857e9633d780a14c836a7cdbcea9cef 
  * but with HTTP requests instead of spawning a Q process */
+/* These defines are required by numpy for some reason */
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL qdbc
 #include <numpy/arrayobject.h>
@@ -42,8 +49,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
+
 /* Can we definitely work on windows? 
  * TODO: fix the build script on windows
+ * Also TODO: Test the build on windows and OSX
  */
 #include <fcntl.h>
 #include <errno.h>
@@ -93,6 +103,7 @@ static PyObject* QdbcError;
  * is -255. (The error message is contained in a member variable
  * kclose(int) -> void: the only function in use with a self-explanatory name 
  */
+/* TODO: document the accessor functions here */
 
 PyObject* get_atom(K k) {
     TRACE("reading atom");
@@ -104,7 +115,7 @@ PyObject* get_atom(K k) {
         case -1: return PyBool_FromLong(k->g);                      /* bool  */
         case -4: return PyInt_FromLong(k->g);                       /* byte  */ 
         case -5: return PyInt_FromLong(k->h);                       /* short */
-        case -6: return PyLong_FromLong(k->i);                      /* int   */
+        case -6: return PyInt_FromLong(k->i);                      /* int   */
         case -7: return PyLong_FromLong(k->j);                      /* long  */
         case -8: return PyFloat_FromDouble(k->e);                   /* real  */
         case -9: return PyFloat_FromDouble(k->f);                   /* float */
@@ -185,6 +196,12 @@ static PyObject* get_list(K k) {
 
     int numpy_arr_type = 0;
 
+    if(len < 0) {
+        TRACE("wtf len is negative %ld", len);
+        PyErr_SetString(QdbcError, "List length negative");
+        return NULL;
+    }
+
     switch(k->t) {
         /* numpy can handle arrays of arbitrary python objects. There's no 
          * guarantee that it's going to be fast, though :) */
@@ -192,7 +209,7 @@ static PyObject* get_list(K k) {
         case 1: numpy_arr_type = NPY_BOOL; break;      /* bool */
         case 4: numpy_arr_type = NPY_BYTE; break;      /* byte */
         case 5: numpy_arr_type = NPY_SHORT; break;     /* short */
-        case 6: numpy_arr_type = NPY_INT; break;       /* int */
+        case 6: numpy_arr_type = NPY_INT32; break;     /* int */
         case 7: numpy_arr_type = NPY_LONG; break;      /* long */
         case 8: numpy_arr_type = NPY_FLOAT; break;     /* real */
         case 9: numpy_arr_type = NPY_DOUBLE; break;    /* float */
@@ -243,7 +260,7 @@ static PyObject* get_list(K k) {
     PyObject* ret_val = NULL;
 
     switch(k->t) {
-        case 0:
+        case 0: /* mixed */
             {
                 for(size_t i=0;i<len;i++) {
                     K elem = kK(k)[i];
@@ -260,6 +277,69 @@ static PyObject* get_list(K k) {
                 }
             }
             ret_val = (PyObject*)array;
+            break;
+        case 1: /* bool */
+            {
+                bool* dest = PyArray_GETPTR1(array, 0);
+                /* G is unsigned char, we can convert it to bool */
+                bool* src = (bool*)kG(k);
+                memcpy(dest, src, len*sizeof(bool));
+            }
+            ret_val = (PyObject*)array;
+            break;
+        case 4: /* byte */ 
+            {
+                uint8_t* dest = PyArray_GETPTR1(array, 0);
+                uint8_t* src = kG(k);
+                memcpy(dest, src, len*sizeof(uint8_t));
+            }
+            ret_val = (PyObject*)array;
+            break;
+        case 5: /* short */
+            {
+                int16_t* dest = PyArray_GETPTR1(array, 0);
+                int16_t* src = kH(k);
+                memcpy(dest, src, len*sizeof(int16_t));
+            }
+            ret_val = (PyObject*)array;
+            break;
+        case 6: /* int */
+            {
+                /* Q int values are always 32 bit, so we use int32_t */
+                int32_t* dest = PyArray_GETPTR1(array, 0);
+                int32_t* src = kI(k);
+                memcpy(dest, src, len*sizeof(int32_t));
+            }
+            ret_val = (PyObject*)array;
+            break;
+        case 7: /* long */
+            {
+                int64_t* dest = PyArray_GETPTR1(array, 0);
+                /* not sure why J(long long) is incompatible with int64_t(also long long) */ 
+                int64_t* src = (int64_t*)kJ(k);
+                memcpy(dest, src, len*sizeof(int64_t));
+            }
+            ret_val = (PyObject*)array;
+            break;
+        case 8: /* real */
+            {
+                float* dest = PyArray_GETPTR1(array, 0);
+                float* src = kE(k);
+                memcpy(dest, src, len*sizeof(float));
+            }
+            ret_val = (PyObject*)array;
+            break;
+        case 9: /* float */
+            {
+                double* dest = PyArray_GETPTR1(array, 0);
+                double* src = kF(k);
+                memcpy(dest, src, len*sizeof(double));
+            }
+
+            ret_val = (PyObject*)array;
+            break;
+        case 10: /* char */
+            /* TODO: How do we implement that? Char arrays are strings in Q as well */
             break;
         default:
             TRACE("list parsing not yet implemented for %d", k->t);
@@ -339,7 +419,7 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
 
     PyObject* retVal = NULL;
 
-    TRACE("Object type %d\n", res->t);
+    TRACE("Object type %d", res->t);
 
     if(res->t < 0) {
         retVal = get_atom(res);

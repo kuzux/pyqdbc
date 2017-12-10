@@ -21,17 +21,29 @@
 **/
 
 #include <Python.h>
+/* Apparently datetimes in python need to be imported and initialized separately */
 #include <datetime.h>
 
 #define KXVER 3
 #include <k.h>
 
-#include <fcntl.h>
-#include <errno.h>
+/* we still need this outside debug mode because we need to use snprintf */
 #include <stdio.h>
 #include <math.h>
+/* Can we definitely work on windows? 
+ * TODO: fix the build script on windows
+ */
+#include <fcntl.h>
+#include <errno.h>
 
 #define BUFSIZE 255
+
+#define DEBUG
+#ifdef DEBUG
+    #define TRACE printf
+#else
+    #define printf
+#endif
 
 #ifdef _WIN32 /* Windows-related shit, basically */
   #define F_GETFL 3
@@ -46,13 +58,6 @@
 static PyObject* QdbcError;
 
 PyObject* get_atom(K k) {
-    long micros, secs;
-    double us;
-
-    int years;
-    int months;
-    int days;
-
     PyObject* tmp;
 
     switch(k->t) {
@@ -67,19 +72,23 @@ PyObject* get_atom(K k) {
         case -11: return PyString_FromString(k->s);                 /* symbol */
         case -12: 
             /* timestamp */
-            micros = (k->j%1000000000)/1000;
-            secs = (k->j/1000000000);
-            us = (micros/1000000.0);
+            {
+                long micros = (k->j%1000000000)/1000;
+                long secs = (k->j/1000000000);
+                double us = (micros/1000000.0);
 
-            tmp = PyFloat_FromDouble(EPOCH_OFFSET_SECS+secs+us);
-            tmp = Py_BuildValue("(o)", tmp);
-            return PyDateTime_FromTimestamp(tmp);
+                tmp = PyFloat_FromDouble(EPOCH_OFFSET_SECS+secs+us);
+                tmp = Py_BuildValue("(o)", tmp);
+                return PyDateTime_FromTimestamp(tmp);
+            }
         case -13:
             /* month */
-            months = 1 + (k->i)%12;
-            years = 2000 + (k->i)/12;
+            {
+                int months = 1 + (k->i)%12;
+                int years = 2000 + (k->i)/12;
 
-            return PyDateTime_FromDateAndTime(years, months, 1, 0, 0, 0, 0);
+                return PyDateTime_FromDateAndTime(years, months, 1, 0, 0, 0, 0);
+            }
         case -14:
             /* date */
 
@@ -92,7 +101,7 @@ PyObject* get_atom(K k) {
              * It's advised to not use them in Q, and I'm not bothering
              * to do the conversion yet 
              */
-            printf("%f", k->f);
+            TRACE("%f", k->f);
             return NULL; 
         case -16:
             /* timespan */
@@ -173,7 +182,7 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
 
     PyObject* retVal = NULL;
 
-    printf("Object type %d\n", res->t);
+    TRACE("Object type %d\n", res->t);
 
     if(res->t < 0) {
        retVal = get_atom(res);

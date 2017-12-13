@@ -20,6 +20,8 @@
  * SOFTWARE.
 **/
 
+/* TODO: Separate this beast of a file into multiple files */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -105,6 +107,7 @@ static PyObject* QdbcError;
  * is -255. (The error message is contained in a member variable
  * kclose(int) -> void: the only function in use with a self-explanatory name 
  */
+
 /* TODO: document the accessor functions here */
 
 PyObject* get_atom(K k) {
@@ -112,17 +115,43 @@ PyObject* get_atom(K k) {
 
     PyObject* tmp;
 
-    /* TODO: maybe we should add an example for each of Q's atom types? */
+    /* Basic Q datatypes:
+     *   (taken from 'Q for mortals', don't think it's accurate as far as ints 
+     *   and longs are concerned 
+     * 1b      -> boolean
+     * 0x26    -> byte (8bit)
+     * 42h     -> short (16bit)
+     * 42      -> int (32bit)
+     * 42j     -> long (64bit)
+     * 4.2e    -> real (single precision)
+     * 4.2f    -> float (double precision)
+     * "c"     -> char (not sure if unicode)
+     * `zaphod -> symbol (definitely not a string). python, unfortunately,
+     *   lacks a symbol type
+     * ========================
+     * temporal types: (python is a bit lacking in this regard as well)
+     * 2015.01.01T00:00:00.000000000 -> timestamp (explained in detail
+     *   below)
+     * 2006.07m   -> month
+     * 2006.07.21 -> date
+     * 2006.07.21T09:13:39 -> datetime (how common are those?)
+     * 12:00:00.000000000 -> timespan
+     * 23:59        -> minute
+     * 23:59:59     -> second
+     * 09:01:02:042 -> time
+     * =====================
+     * :: -> void
+     */
     switch(k->t) {
-        case -1: return PyBool_FromLong(k->g);                      /* bool  */
-        case -4: return PyInt_FromLong(k->g);                       /* byte  */ 
-        case -5: return PyInt_FromLong(k->h);                       /* short */
-        case -6: return PyInt_FromLong(k->i);                      /* int   */
-        case -7: return PyLong_FromLong(k->j);                      /* long  */
-        case -8: return PyFloat_FromDouble(k->e);                   /* real  */
-        case -9: return PyFloat_FromDouble(k->f);                   /* float */
+        case -1: return PyBool_FromLong(k->g);                        /* bool  */
+        case -4: return PyInt_FromLong(k->g);                         /* byte  */ 
+        case -5: return PyInt_FromLong(k->h);                         /* short */
+        case -6: return PyInt_FromLong(k->i);                         /* int   */
+        case -7: return PyLong_FromLong(k->j);                        /* long  */
+        case -8: return PyFloat_FromDouble(k->e);                     /* real  */
+        case -9: return PyFloat_FromDouble(k->f);                     /* float */
         case -10: return PyString_FromStringAndSize((char*)&k->i, 1); /* char */
-        case -11: return PyString_FromString(k->s);                 /* symbol */
+        case -11: return PyString_FromString(k->s)  ;                 /* symbol */
         case -12: 
             /* timestamp */
             /* The quirk of those objects is that the epoch is the millenium.
@@ -383,7 +412,6 @@ static PyObject* get_list(K k) {
 }
 
 static PyObject* get_dict(K k) {
-    /* function stub */
     TRACE("getting dictionary");
 
     K keys = kK(k)[0]; /* OK, how racist are we? */
@@ -462,8 +490,10 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
         TRACE("getting void");
         /* we have a void object */
         Py_INCREF(Py_None);
+        
         TRACE("closing connection");
         kclose(conn);
+
         return Py_None;
     }
 
@@ -482,7 +512,8 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
         retVal = get_list(res);
     }
 
-    if(!retVal) {
+    if(!retVal /*Check if we got a null value */ && 
+            !PyErr_Occurred() /* Check we haven't received a previous exception */ ) {
         PyErr_SetString(QdbcError, "Deserializing this type is not yet implemented");
         return NULL;
     }
@@ -491,20 +522,6 @@ static PyObject* qdbc_query(PyObject* self, PyObject* args) {
     kclose(conn);
 
     return retVal;
-}
-
-static PyObject* qdbc_testnumpy(PyObject* self, PyObject* args) {
-    double* vals = (double*)malloc(2*sizeof(double));
-    vals[0] = 3.5;
-    vals[1] = 7.8;
-
-    long dims[1];
-    dims[0] = 2;
-    int numDims = 1;
-
-    PyObject* res = PyArray_SimpleNewFromData(numDims, dims, NPY_DOUBLE, vals);
-    PyArray_ENABLEFLAGS((PyArrayObject*)res, NPY_ARRAY_OWNDATA);
-    return res;
 }
 
 static PyObject* qdbc_ping(PyObject* self, PyObject* args) {
@@ -544,17 +561,19 @@ static PyMethodDef QdbcMethods[] = {
         "Run a KDB query"},
     {"ping", qdbc_ping, METH_VARARGS,
         "Checks if a Q instance is healthy"},
-    {"testnumpy", qdbc_testnumpy, METH_VARARGS,
-        "Try returning a numpy array from C"},
     {NULL, NULL, 0, NULL}
 };
 
+/* name of this function is actually important, this is the main
+ * init method called by the python interpreter */
 PyMODINIT_FUNC initqdbc(void) {
     TRACE("Initializing module");
+
     PyObject* m;
     m = Py_InitModule("qdbc", QdbcMethods);
     
     if(m == NULL) {
+        TRACE("Module initialization failed");
         return;
     }
 
@@ -564,8 +583,11 @@ PyMODINIT_FUNC initqdbc(void) {
 
     PyDateTime_IMPORT;
     import_array();
+    TRACE("init succeeded");
 }
 
+/* We still need a main function in the extension code to call if we're
+ * directly loaded by the python interpreter instead of being import'ed */
 int main(int argc, char** argv) {
     Py_SetProgramName(argv[0]);
     Py_Initialize();

@@ -21,6 +21,7 @@
 import qdbc
 
 # TODO: write some code to package the whole thing
+# TODO: split the C file into multiple source files
 
 class QConnection(object):
     def __init__(self, host="localhost", port=5042):

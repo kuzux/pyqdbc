@@ -1,7 +1,7 @@
 from distutils.core import setup, Extension
 
 qdbc = Extension('qdbc',
-                    sources = ['src/qdbc.c'],
+                    sources = ['src/qdbc.c', 'src/atom.c', 'src/list.c', 'src/dict_table.c'],
                     include_dirs = ['include'],
                     library_dirs = ['lib'],
                     extra_objects = ['lib/c.o'])
